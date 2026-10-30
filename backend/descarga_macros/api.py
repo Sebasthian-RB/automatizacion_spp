@@ -1,13 +1,20 @@
 """
 Endpoint: POST /api/sbs/descargar/
-Body JSON: {"recursos": ["clave_simple", {"clave": "boletin_informativo_mensual", "anio": 2019, "mes": 3}]}
+Body JSON:
+  {"recursos": [ "clave"
+               | {"clave": "x", "anio": 2025, "mes": 3}
+               | {"clave": "x", "periodos": [{"anio": 2025, "mes": 3}, {"anio": 2025, "mes": 4}]} ],
+   "forzar": false}
+
+Por defecto OMITE lo ya descargado e íntegro ("ya_descargado"); "forzar": true lo vuelve a bajar.
+Para sincronizaciones grandes (muchos años) usa el script sincronizar_sbs.py, no la API.
 
 Controles de seguridad:
   - Solo POST, protegido por CSRF (no se exime) y sesión autenticada de staff.
   - Solo peticiones locales (REMOTE_ADDR): este endpoint mueve el cursor y abre
     ventanas EN LA MÁQUINA DEL SERVIDOR, así que jamás debe ser invocable desde fuera.
     (No se confía en X-Forwarded-For.)
-  - Cuerpo limitado, esquema validado, claves de catálogo cerrado, máx. 3 por llamada.
+  - Cuerpo limitado, esquema validado, claves de catálogo cerrado, máx. 3 recursos y 24 períodos por llamada.
   - Errores genéricos al cliente; el detalle queda sólo en el log del servidor.
   - Respuestas sin caché y sin rutas absolutas del sistema de archivos.
 """
@@ -20,30 +27,51 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
-from descarga_macros.navegador import ErrorDescargaSBS, descargar_recurso
+from descarga_macros.navegador import ErrorDescargaSBS, descargar_lote
 
 log = logging.getLogger(__name__)
 
-MAX_BODY = 1024
+MAX_BODY = 4096
+MAX_PERIODOS = 24
 MAX_RECURSOS = 3
 CLAVE_RE = re.compile(r"^[a-z0-9_]{1,50}$")
 IPS_LOCALES = {"127.0.0.1", "::1"}
 
 
+def _entero(n):
+    return type(n) is int      # rechaza bool, str, float, None
+
+
 def _normalizar(item):
-    """Acepta "clave" o {"clave", "anio", "mes"}; cualquier otra forma/campo se rechaza."""
+    """Devuelve (clave, periodos|None). Acepta "clave", {"clave","anio","mes"} o {"clave","periodos":[...]}."""
     if isinstance(item, str):
-        clave, anio, mes = item, None, None
-    elif isinstance(item, dict) and set(item) <= {"clave", "anio", "mes"}:
-        clave, anio, mes = item.get("clave"), item.get("anio"), item.get("mes")
+        clave, periodos = item, None
+    elif isinstance(item, dict) and set(item) <= {"clave", "anio", "mes", "periodos"}:
+        clave = item.get("clave")
+        if "periodos" in item:
+            if "anio" in item or "mes" in item:
+                raise ValueError
+            crudos = item["periodos"]
+            if not isinstance(crudos, list) or not 1 <= len(crudos) <= MAX_PERIODOS:
+                raise ValueError
+            periodos = []
+            for q in crudos:
+                if not (isinstance(q, dict) and set(q) == {"anio", "mes"}):
+                    raise ValueError
+                periodos.append((q["anio"], q["mes"]))
+        elif "anio" in item or "mes" in item:
+            periodos = [(item.get("anio"), item.get("mes"))]
+        else:
+            periodos = None
     else:
         raise ValueError
     if not (isinstance(clave, str) and CLAVE_RE.fullmatch(clave)):
         raise ValueError
-    for n in (anio, mes):   # enteros estrictos (bool es subclase de int: se descarta)
-        if n is not None and type(n) is not int:
+    if periodos is not None:
+        if not all(_entero(n) for q in periodos for n in q):
             raise ValueError
-    return clave, anio, mes
+        periodos = tuple(periodos)
+    return clave, periodos
 
 
 def _json(datos: dict, status: int = 200) -> JsonResponse:
@@ -69,20 +97,26 @@ def descargar_sbs(request):
     try:
         datos = json.loads(request.body.decode("utf-8"))
         recursos = datos["recursos"]
-        if not isinstance(recursos, list) or not 1 <= len(recursos) <= MAX_RECURSOS:
+        forzar = datos.get("forzar", False)
+        if (not isinstance(recursos, list) or not 1 <= len(recursos) <= MAX_RECURSOS
+                or type(forzar) is not bool):
             raise ValueError
         pedidos = list(dict.fromkeys(_normalizar(r) for r in recursos))   # sin duplicados
-    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError, AttributeError):
         return _json({"error": "solicitud_invalida"}, 400)
 
     resultados, status = [], 200
-    for clave, anio, mes in pedidos:
+    for clave, periodos in pedidos:
         try:
-            resultados.append({"ok": True, **descargar_recurso(clave, anio, mes)})
+            lote = descargar_lote(clave, list(periodos) if periodos else None, forzar=forzar)
         except ErrorDescargaSBS as exc:
             log.warning("Descarga SBS fallida: recurso=%s codigo=%s", clave, exc.codigo)
-            resultados.append({"ok": False, "clave": clave, "anio": anio, "mes": mes,
-                               "error": exc.codigo, "detalle": exc.mensaje_publico})
+            resultados.append({"clave": clave, "estado": "error", "error": exc.codigo,
+                               "mensaje": exc.mensaje_publico})
             status = exc.http_status
-            break   # si falla uno, no se sigue controlando el cursor
-    return _json({"resultados": resultados}, status)
+            break   # no se sigue controlando el cursor
+        resultados.extend(lote)
+        if any(r.get("abortado") for r in lote):
+            break
+    ok = all(r.get("estado") in ("descargado", "ya_descargado", "no_disponible") for r in resultados)
+    return _json({"ok": ok, "resultados": resultados}, status)

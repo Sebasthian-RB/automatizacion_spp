@@ -1,0 +1,21 @@
+{
+  "archivos": {
+    "boletin_informativo_mensual_202601.zip": {
+      "anio": 2026,
+      "bytes": 1126958,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T19:42:21+00:00",
+      "mes": 1,
+      "sha256": "6a856dd3e9b19651040390bd72d6734f184f071d2762a7956abe99fb3121565e"
+    },
+    "boletin_informativo_mensual_202602.zip": {
+      "anio": 2026,
+      "bytes": 1132251,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T19:42:28+00:00",
+      "mes": 2,
+      "sha256": "86626a4c583db240afd2658e257d80d88f0339ced18cc5edea4fca937f0175ed"
+    }
+  },
+  "version": 1
+}

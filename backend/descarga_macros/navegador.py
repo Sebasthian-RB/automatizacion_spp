@@ -33,6 +33,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -52,6 +53,7 @@ CLAVE_RE = re.compile(r"^[a-z0-9_]{1,50}$")
 MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
          "agosto", "setiembre", "octubre", "noviembre", "diciembre")   # = nombres de las capturas mes_*.png
 ANIO_MIN = 1996   # el Boletín Informativo Mensual de la SBS empieza en 1996
+TITULOS_GUARDAR = ("Guardar como", "Save As")
 MARCAS_PRIVADO = ("InPrivate", "Incógnito", "Incognito")
 TITULOS_OK = ("SBS", "Superintendencia", "Chrome", "Edge", "InPrivate", "Incógnito", "Incognito",
               "Guardar como", "Save As")   # los dos últimos: diálogo de guardado del navegador
@@ -118,6 +120,14 @@ class ElementoNoEncontrado(ErrorDescargaSBS):
 
 class DescargaNoCompletada(ErrorDescargaSBS):
     codigo, mensaje_publico, http_status = "descarga_no_completada", "La descarga no se completó a tiempo.", 504
+
+
+class CapturaFaltante(ErrorDescargaSBS):
+    codigo, mensaje_publico = "captura_faltante", "Falta una captura de referencia."
+
+
+class LoteDemasiadoGrande(ErrorDescargaSBS):
+    codigo, mensaje_publico, http_status = "lote_demasiado_grande", "Demasiados períodos en una sola llamada.", 400
 
 
 class ArchivoInvalido(ErrorDescargaSBS):
@@ -299,7 +309,7 @@ def _ruta_imagen(nombre) -> Path:
         raise ElementoNoEncontrado()
     ruta = (REFERENCIAS_DIR / nombre).resolve()
     if ruta.parent != REFERENCIAS_DIR.resolve() or not ruta.is_file():
-        raise ElementoNoEncontrado()
+        raise CapturaFaltante(f"falta la captura {nombre}")
     return ruta
 
 
@@ -370,19 +380,51 @@ def _guardar_como(pyautogui, descargas: Path, paso: dict, limite: float) -> None
     pyautogui.press("enter")
 
 
-def _ejecutar_pasos(pasos: list[dict], limite: float, descargas: Path) -> None:
+def _aceptar_guardar_como(pyautogui, descargas: Path, paso: dict, limite: float) -> None:
+    """
+    Si el navegador muestra "Guardar como" (p. ej. por una política que pide ubicación en cada descarga),
+    escribe una ruta NUESTRA dentro de la carpeta temporal y acepta. Con "opcional": True, si el diálogo
+    no aparece no es error (la descarga empezó directa).
+    """
+    ext = str(paso.get("extension", "")).lower()
+    obtener = getattr(pyautogui, "getActiveWindowTitle", None)
+    if ext not in FIRMAS or obtener is None:
+        raise ControlInterrumpido("aceptar_guardar_como: extensión inválida o sin API de ventanas")
+    fin = min(limite, time.monotonic() + min(float(paso.get("timeout", 12)), 30))
+    while time.monotonic() < fin:
+        titulo = obtener() or ""
+        if any(t in titulo for t in TITULOS_GUARDAR):
+            ruta = descargas / f"descarga_{uuid.uuid4().hex[:8]}{ext}"   # nombre único por archivo
+            if not str(ruta).isascii():
+                raise ControlInterrumpido("la ruta temporal tiene caracteres no ASCII")
+            time.sleep(0.5)
+            pyautogui.hotkey("ctrl", "a")                      # reemplaza el nombre propuesto
+            pyautogui.write(str(ruta), interval=0.02)
+            pyautogui.press("enter")
+            return
+        time.sleep(0.3)
+    if not paso.get("opcional"):
+        raise ControlInterrumpido("no apareció el diálogo Guardar como")
+
+
+def _ejecutar_pasos(pasos: list[dict], limite: float, descargas: Path,
+                    hechos: set | None = None, enfocar: bool = False) -> None:
     import pyautogui  # import tardío: falla si no hay escritorio
 
     pyautogui.FAILSAFE = True   # esquina superior izquierda = abortar
     pyautogui.PAUSE = 0.3
     ancho, alto = pyautogui.size()
-    _enfocar_navegador(pyautogui, limite)
+    if enfocar:
+        _enfocar_navegador(pyautogui, limite)
 
     for paso in pasos:
         if time.monotonic() > limite:
             raise ControlInterrumpido("se agotó el tiempo máximo de control (timeout_total)")
         _ventana_ok(pyautogui)
         accion = paso.get("accion")
+        etiqueta = paso.get("una_vez")          # pasos que sólo deben ocurrir una vez por sesión
+        if etiqueta and hechos is not None and etiqueta in hechos:
+            continue
         try:
             if accion == "esperar":
                 time.sleep(max(0.0, min(float(paso["segundos"]), 30.0)))
@@ -422,8 +464,12 @@ def _ejecutar_pasos(pasos: list[dict], limite: float, descargas: Path) -> None:
                 pyautogui.scroll(max(-2000, min(int(paso["cantidad"]), 2000)))
             elif accion == "guardar_como":
                 _guardar_como(pyautogui, descargas, paso, limite)
+            elif accion == "aceptar_guardar_como":
+                _aceptar_guardar_como(pyautogui, descargas, paso, limite)
             else:
                 raise ValueError
+            if etiqueta and hechos is not None:
+                hechos.add(etiqueta)
         except pyautogui.FailSafeException:
             raise ControlInterrumpido("failsafe: el mouse llegó a la esquina superior izquierda")
         except ErrorDescargaSBS:
@@ -472,6 +518,23 @@ def _validar_archivo(ruta: Path, extensiones: set[str], max_bytes: int) -> str:
     return ext
 
 
+def _verificar_periodo_zip(ruta: Path, plantilla: str, anio: int, mes: int) -> None:
+    """
+    Comprueba, SIN extraer, que el .zip contiene el período pedido (p. ej. "Bolweb 03_2025").
+    Evita cargar datos de otro mes si el cursor pulsó el botón equivocado.
+    """
+    patron = plantilla.format(anio=anio, mes=mes)
+    try:
+        with zipfile.ZipFile(ruta) as z:
+            nombres = z.namelist()
+    except (zipfile.BadZipFile, OSError):
+        raise ArchivoInvalido("el .zip está dañado o no es un zip válido")
+    if not any(patron in nombre for nombre in nombres):
+        raise ArchivoInvalido(
+            f"el zip no corresponde al período {anio}-{mes:02d} (se buscó {patron!r}); "
+            f"contiene: {nombres[:5]}")
+
+
 def _sha256(ruta: Path) -> str:
     h = hashlib.sha256()
     with ruta.open("rb") as fh:
@@ -480,70 +543,308 @@ def _sha256(ruta: Path) -> str:
     return h.hexdigest()
 
 
-def _mover_a_destino(origen: Path, prefijo: str, ext: str) -> Path:
-    destino_dir = Path(_cfg("SBS_DESCARGAS_DIR", Path(settings.BASE_DIR) / "datos_descargados" / "sbs"))
-    destino_dir.mkdir(parents=True, exist_ok=True)
-    destino_dir = destino_dir.resolve()
-    marca = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    final = (destino_dir / f"{prefijo}_{marca}_{uuid.uuid4().hex[:8]}{ext}").resolve()
-    if final.parent != destino_dir:  # defensa extra contra path traversal
-        raise ArchivoInvalido()
-    shutil.move(str(origen), str(final))
+# --------------------------------------------------------------------------- #
+# Registro (manifiesto) de lo ya descargado: base de la sincronización reproducible
+# --------------------------------------------------------------------------- #
+MANIFIESTO = "manifiesto_sbs.json"
+
+
+def _destino_dir() -> Path:
+    d = Path(_cfg("SBS_DESCARGAS_DIR", Path(settings.BASE_DIR) / "datos_descargados" / "sbs"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d.resolve()
+
+
+def _leer_manifiesto(destino: Path) -> dict:
+    try:
+        datos = json.loads((destino / MANIFIESTO).read_text(encoding="utf-8"))
+        if isinstance(datos, dict) and isinstance(datos.get("archivos"), dict):
+            return datos
+    except (OSError, ValueError):
+        pass
+    return {"version": 1, "archivos": {}}
+
+
+def _guardar_manifiesto(destino: Path, datos: dict) -> None:
+    tmp = destino / (MANIFIESTO + ".tmp")
+    tmp.write_text(json.dumps(datos, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, destino / MANIFIESTO)       # escritura atómica
+
+
+def _registrar(destino: Path, nombre: str, clave: str, anio, mes, tam: int, digest: str) -> None:
+    datos = _leer_manifiesto(destino)
+    datos["archivos"][nombre] = {
+        "clave": clave, "anio": anio, "mes": mes, "bytes": tam, "sha256": digest,
+        "descargado_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    _guardar_manifiesto(destino, datos)
+
+
+def _estado_entrada(destino: Path, nombre: str, info: dict, verificar_hash: bool) -> str:
+    ruta = destino / Path(nombre).name           # sólo el nombre: nunca rutas del manifiesto
+    if not ruta.is_file():
+        return "faltante"
+    if ruta.stat().st_size != info.get("bytes"):
+        return "alterado"
+    if verificar_hash and _sha256(ruta) != info.get("sha256"):
+        return "alterado"
+    return "ok"
+
+
+def estado_periodo(clave: str, anio, mes, verificar_hash: bool = True) -> str:
+    """
+    Verifica si un período ya está descargado Y sigue íntegro.
+    Devuelve "ok" | "faltante" (nunca se descargó o falta el archivo) | "alterado" (tamaño o sha256 distinto).
+    Para recursos sin período, "ok" significa que ya hay un archivo de HOY.
+    """
+    destino = _destino_dir()
+    prefijo_hoy = f"{clave}_{datetime.now(timezone.utc):%Y%m%d}"
+    for nombre, info in _leer_manifiesto(destino)["archivos"].items():
+        if info.get("clave") != clave:
+            continue
+        if anio is None:
+            if nombre.startswith(prefijo_hoy):
+                return _estado_entrada(destino, nombre, info, verificar_hash)
+        elif (info.get("anio"), info.get("mes")) == (anio, mes):
+            return _estado_entrada(destino, nombre, info, verificar_hash)
+    return "faltante"
+
+
+def planificar(clave: str, desde: int | None = None, hasta: int | None = None,
+               forzar: bool = False, verificar_hash: bool = True):
+    """
+    Calcula qué falta por descargar. Devuelve (pendientes, omitidos): listas de (anio, mes),
+    pendientes ordenados del año más reciente al más antiguo y, dentro de cada año, de enero a diciembre.
+    No abre el navegador. Los meses futuros no se consideran.
+    """
+    clave = validar_clave(clave)
+    if not RECURSOS_SBS[clave].get("periodo"):
+        raise RecursoNoPermitido()
+    hoy = datetime.now(timezone.utc)
+    desde = ANIO_MIN if desde is None else desde
+    hasta = hoy.year if hasta is None else hasta
+    if (type(desde) is not int or type(hasta) is not int
+            or not ANIO_MIN <= desde <= hasta <= hoy.year):
+        raise RecursoNoPermitido()
+    pendientes, omitidos = [], []
+    for anio in range(hasta, desde - 1, -1):
+        for mes in range(1, 13):
+            if anio == hoy.year and mes > hoy.month:
+                break
+            if not forzar and estado_periodo(clave, anio, mes, verificar_hash) == "ok":
+                omitidos.append((anio, mes))
+            else:
+                pendientes.append((anio, mes))
+    return pendientes, omitidos
+
+
+# --------------------------------------------------------------------------- #
+# Utilidades de la sesión de descarga
+# --------------------------------------------------------------------------- #
+def _nombre_final(clave: str, anio, mes, ext: str) -> str:
+    """Nombre determinista: por período -> clave_AAAAMM.ext ; sin período -> clave_AAAAMMDD.ext"""
+    if anio is not None:
+        return f"{clave}_{anio}{mes:02d}{ext}"
+    return f"{clave}_{datetime.now(timezone.utc):%Y%m%d}{ext}"
+
+
+def _mover_a_destino(origen: Path, nombre: str) -> Path:
+    destino = _destino_dir()
+    final = (destino / nombre).resolve()
+    if final.parent != destino:                  # defensa extra contra path traversal
+        raise ArchivoInvalido("nombre de destino inválido")
+    tmp = destino / (nombre + ".part")
+    shutil.move(str(origen), str(tmp))           # funciona entre discos distintos
+    os.replace(tmp, final)                       # reemplazo atómico
     return final
+
+
+def _vaciar_carpeta(carpeta: Path) -> None:
+    for f in carpeta.iterdir():
+        try:
+            if f.is_file():
+                f.unlink()
+        except OSError:
+            pass
+
+
+def _faltan_capturas(pasos: list[dict]) -> list[str]:
+    faltan = set()
+    for paso in pasos:
+        for campo in ("imagen", "debajo_de"):
+            nombre = paso.get(campo)
+            if isinstance(nombre, str) and not (
+                    IMAGEN_RE.fullmatch(nombre) and (REFERENCIAS_DIR / nombre).is_file()):
+                faltan.add(nombre)
+    return sorted(faltan)
+
+
+def _validar_periodos(recurso: dict, periodos) -> list[tuple]:
+    if not recurso.get("periodo"):
+        if periodos not in (None, [], [(None, None)]):
+            raise RecursoNoPermitido()
+        return [(None, None)]
+    if not isinstance(periodos, (list, tuple)) or not periodos:
+        raise RecursoNoPermitido()
+    vistos = []
+    for item in periodos:
+        try:
+            anio, mes = item
+        except (TypeError, ValueError):
+            raise RecursoNoPermitido()
+        validar_periodo(recurso, anio, mes)
+        if (anio, mes) not in vistos:
+            vistos.append((anio, mes))
+    return sorted(vistos, key=lambda q: (-q[0], q[1]))   # años recientes primero; meses ascendentes
 
 
 # --------------------------------------------------------------------------- #
 # API pública del servicio
 # --------------------------------------------------------------------------- #
-def descargar_recurso(clave: str, anio: int | None = None, mes: int | None = None) -> dict:
+def descargar_lote(clave: str, periodos=None, forzar: bool = False,
+                   incluir_detalle: bool = False, max_periodos: int | None = None) -> list[dict]:
     """
-    Abre el navegador real, mueve el cursor según el catálogo, espera la descarga,
-    valida el archivo y lo guarda. Devuelve sólo metadatos (sin rutas absolutas).
+    Descarga VARIOS períodos en UNA sola sesión de navegador (un candado, un enfriamiento).
+
+    * Omite los períodos ya descargados e íntegros (manifiesto + tamaño + sha256), salvo forzar=True.
+    * Devuelve un dict por período con "estado": descargado | ya_descargado | no_disponible | error | no_procesado.
+    * no_disponible: el mes aún no está publicado. Si ocurre en el año en curso, se omiten los meses siguientes.
+    * Un error "recuperable" (archivo inválido, captura faltante) se anota y se continúa; cualquier otro error
+      detiene la sesión y marca el resto como no_procesado (no se sigue controlando el cursor).
+    * Errores previos a abrir el navegador (validación, ocupado, enfriamiento...) se lanzan como excepción.
     """
     global _ultima_ejecucion
     clave = validar_clave(clave)
     recurso = RECURSOS_SBS[clave]
-    anio, mes = validar_periodo(recurso, anio, mes)
-    pasos = _resolver_pasos(recurso["pasos"], anio, mes)
-    prefijo = f"{clave}_{anio}{mes:02d}" if anio else clave
+    lista = _validar_periodos(recurso, periodos)
+    if len(lista) > int(max_periodos or _cfg("SBS_MAX_PERIODOS", 24)):
+        raise LoteDemasiadoGrande()
     url = validar_url(recurso["url"])
     extensiones = {e.lower() for e in recurso["extensiones"]}
     max_bytes = int(_cfg("SBS_MAX_BYTES", 50 * 1024 * 1024))
+    hoy = datetime.now(timezone.utc)
 
-    if not _LOCK.acquire(blocking=False):
-        raise SistemaOcupado()
-    raiz, proc = None, None
-    try:
-        if time.monotonic() - _ultima_ejecucion < int(_cfg("SBS_COOLDOWN_SEGUNDOS", 30)):
-            raise EnfriamientoActivo()
-        _ultima_ejecucion = time.monotonic()
+    resultados: dict = {}
 
-        exe = _ruta_navegador()
-        raiz = Path(tempfile.mkdtemp(prefix="sbs_"))   # carpeta privada del usuario
-        perfil, descargas = _preparar_perfil(raiz)
-        limite = time.monotonic() + int(recurso.get("timeout_total", 120))
+    def base(q):
+        return {"clave": clave, "anio": q[0], "mes": q[1]}
 
-        log.info("Inicio de descarga SBS: recurso=%s periodo=%s-%s", clave, anio, mes)   # sin URL, sin cookies
-        proc = _lanzar_navegador(exe, perfil, url)
-        _ejecutar_pasos(pasos, limite, descargas)
+    def con_detalle(d, exc):
+        if incluir_detalle and getattr(exc, "detalle", ""):
+            d["detalle"] = exc.detalle
+        return d
 
-        bruto = _esperar_descarga(descargas, extensiones,
-                                  int(recurso.get("timeout_descarga", 60)), max_bytes)
-        ext = _validar_archivo(bruto, extensiones, max_bytes)
-        digest = _sha256(bruto)
-        tam = bruto.stat().st_size
-        final = _mover_a_destino(bruto, prefijo, ext)
+    def item_error(q, exc, **extra):
+        return con_detalle({**base(q), "estado": "error", "error": exc.codigo,
+                            "mensaje": exc.mensaje_publico, **extra}, exc)
 
-        log.info("Descarga SBS completada: recurso=%s bytes=%s", clave, tam)
-        return {"clave": clave, "anio": anio, "mes": mes, "archivo": final.name,
-                "extension": ext, "bytes": tam, "sha256": digest}
-    except ErrorDescargaSBS:
-        raise
-    except Exception:  # noqa: BLE001 - nada interno se filtra al cliente
-        log.exception("Fallo inesperado en descarga SBS: recurso=%s", clave)
-        raise ErrorDescargaSBS()
-    finally:
-        _cerrar_navegador(proc)      # el cursor/navegador se liberan SIEMPRE
-        if raiz is not None:
-            _borrar_temporal(raiz)   # no queda ni cookie ni caché ni historial
-        _LOCK.release()
+    # 1) ¿cuáles ya están descargados y siguen íntegros?
+    pendientes = []
+    for q in lista:
+        if not forzar and estado_periodo(clave, *q) == "ok":
+            resultados[q] = {**base(q), "estado": "ya_descargado"}
+        else:
+            pendientes.append(q)
+
+    # 2) comprobar capturas ANTES de abrir el navegador
+    inicio = recurso.get("pasos_inicio", recurso.get("pasos", []))
+    por_anio = recurso.get("pasos_por_anio", [])
+    por_periodo = recurso.get("pasos_por_periodo", [])
+    ejecutables = []
+    if pendientes:
+        fijas = _faltan_capturas(_resolver_pasos(inicio, None, None))
+        if fijas:
+            raise CapturaFaltante("faltan capturas fijas: " + ", ".join(fijas))
+        for q in pendientes:
+            faltan = _faltan_capturas(_resolver_pasos(por_anio, *q) + _resolver_pasos(por_periodo, *q))
+            if faltan:
+                resultados[q] = item_error(q, CapturaFaltante("faltan capturas: " + ", ".join(faltan)))
+            else:
+                ejecutables.append(q)
+
+    # 3) sesión de navegador
+    if ejecutables:
+        if not _LOCK.acquire(blocking=False):
+            raise SistemaOcupado()
+        raiz, proc = None, None
+        try:
+            if time.monotonic() - _ultima_ejecucion < int(_cfg("SBS_COOLDOWN_SEGUNDOS", 30)):
+                raise EnfriamientoActivo()
+            _ultima_ejecucion = time.monotonic()
+
+            exe = _ruta_navegador()
+            raiz = Path(tempfile.mkdtemp(prefix="sbs_"))
+            perfil, descargas = _preparar_perfil(raiz)
+            limite = (time.monotonic() + int(recurso.get("timeout_total", 120))
+                      + int(recurso.get("timeout_por_periodo", 90)) * len(ejecutables))
+            log.info("Inicio de sesión SBS: recurso=%s periodos=%s", clave, len(ejecutables))
+            proc = _lanzar_navegador(exe, perfil, url)
+
+            hechos: set = set()
+            _ejecutar_pasos(_resolver_pasos(inicio, None, None), limite, descargas, hechos, enfocar=True)
+
+            anio_abierto, cortados, abortado = None, set(), False
+            for q in ejecutables:
+                anio, mes = q
+                if abortado:
+                    resultados[q] = {**base(q), "estado": "no_procesado"}
+                    continue
+                if anio is not None and anio == hoy.year and anio in cortados:
+                    resultados[q] = {**base(q), "estado": "no_disponible"}
+                    continue
+                try:
+                    _vaciar_carpeta(descargas)
+                    if anio != anio_abierto:
+                        anio_abierto = None
+                        _ejecutar_pasos(_resolver_pasos(por_anio, anio, mes), limite, descargas, hechos)
+                        anio_abierto = anio
+                    _ejecutar_pasos(_resolver_pasos(por_periodo, anio, mes), limite, descargas, hechos)
+
+                    bruto = _esperar_descarga(descargas, extensiones,
+                                              int(recurso.get("timeout_descarga", 60)), max_bytes)
+                    ext = _validar_archivo(bruto, extensiones, max_bytes)
+                    if anio is not None and recurso.get("verificar_zip") and ext == ".zip":
+                        _verificar_periodo_zip(bruto, recurso["verificar_zip"], anio, mes)
+                    digest, tam = _sha256(bruto), bruto.stat().st_size
+                    final = _mover_a_destino(bruto, _nombre_final(clave, anio, mes, ext))
+                    _registrar(_destino_dir(), final.name, clave, anio, mes, tam, digest)
+                    resultados[q] = {**base(q), "estado": "descargado", "archivo": final.name,
+                                     "extension": ext, "bytes": tam, "sha256": digest}
+                except ElementoNoEncontrado as exc:
+                    d = {**base(q), "estado": "no_disponible"}
+                    if anio is not None:
+                        if (hoy.year * 12 + hoy.month) - (anio * 12 + mes) >= 6:
+                            d["revisar_captura"] = True   # un mes tan antiguo debería existir
+                        if anio == hoy.year:
+                            cortados.add(anio)            # publicación secuencial: no probar los siguientes
+                    resultados[q] = con_detalle(d, exc)
+                except (ArchivoInvalido, CapturaFaltante) as exc:
+                    resultados[q] = item_error(q, exc)    # estado limpio: se puede continuar
+                except ErrorDescargaSBS as exc:
+                    resultados[q] = item_error(q, exc, abortado=True)
+                    abortado = True
+                except Exception:  # noqa: BLE001 - nada interno se filtra al cliente
+                    log.exception("Fallo inesperado en sesión SBS: recurso=%s", clave)
+                    resultados[q] = item_error(q, ErrorDescargaSBS(), abortado=True)
+                    abortado = True
+            log.info("Fin de sesión SBS: recurso=%s", clave)
+        finally:
+            _cerrar_navegador(proc)       # el cursor/navegador se liberan SIEMPRE
+            if raiz is not None:
+                _borrar_temporal(raiz)    # no queda ni cookie ni caché ni historial
+            _LOCK.release()
+
+    return [resultados.get(q, {**base(q), "estado": "no_procesado"}) for q in lista]
+
+
+def descargar_recurso(clave: str, anio: int | None = None, mes: int | None = None,
+                      forzar: bool = True) -> dict:
+    """Descarga explícita de UN período (forzar=True por defecto). Lanza excepción si no se logra."""
+    periodos = [(anio, mes)] if (anio is not None or mes is not None) else None
+    r = descargar_lote(clave, periodos, forzar=forzar, incluir_detalle=True)[0]
+    if r["estado"] == "no_disponible":
+        raise ElementoNoEncontrado(r.get("detalle", "el elemento no está en pantalla"))
+    if r["estado"] == "error":
+        clases = {c.codigo: c for c in ErrorDescargaSBS.__subclasses__()}
+        raise clases.get(r.get("error"), ErrorDescargaSBS)(r.get("detalle", ""))
+    return r
