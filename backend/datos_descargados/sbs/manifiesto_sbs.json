@@ -1,10 +1,98 @@
 {
   "archivos": {
+    "boletin_informativo_mensual_202501.zip": {
+      "anio": 2025,
+      "bytes": 1126958,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:48+00:00",
+      "mes": 1,
+      "sha256": "6a856dd3e9b19651040390bd72d6734f184f071d2762a7956abe99fb3121565e"
+    },
+    "boletin_informativo_mensual_202502.zip": {
+      "anio": 2025,
+      "bytes": 1132251,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:57+00:00",
+      "mes": 2,
+      "sha256": "86626a4c583db240afd2658e257d80d88f0339ced18cc5edea4fca937f0175ed"
+    },
+    "boletin_informativo_mensual_202503.zip": {
+      "anio": 2025,
+      "bytes": 1131051,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:23:03+00:00",
+      "mes": 3,
+      "sha256": "5517cc09b86b6bd9b7aa81ee80f643cb284d0563c1d14a82c80c4c7f04577782"
+    },
+    "boletin_informativo_mensual_202504.zip": {
+      "anio": 2025,
+      "bytes": 1160682,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:23:10+00:00",
+      "mes": 4,
+      "sha256": "eabe27ee98f5ca1a4c6578f66cbdadf3632db1c032cc4fd5247b11b660eb800d"
+    },
+    "boletin_informativo_mensual_202506.zip": {
+      "anio": 2025,
+      "bytes": 1169280,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:24:41+00:00",
+      "mes": 6,
+      "sha256": "eea06c8e1fdc78236caf0532424633437e1362fcb4ec6f89e8b5b2642d6cff90"
+    },
+    "boletin_informativo_mensual_202507.zip": {
+      "anio": 2025,
+      "bytes": 507387,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:24:48+00:00",
+      "mes": 7,
+      "sha256": "fc7e593f3744849735391fc888c3957fb7f8e7e97e7644aaf1137e720da1da23"
+    },
+    "boletin_informativo_mensual_202508.zip": {
+      "anio": 2025,
+      "bytes": 1128349,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:19:11+00:00",
+      "mes": 8,
+      "sha256": "6d977d311e2a762d8ec251de0178ad1061c1ed72e558b8ff984947980c0c8d6b"
+    },
+    "boletin_informativo_mensual_202509.zip": {
+      "anio": 2025,
+      "bytes": 1042787,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:24:54+00:00",
+      "mes": 9,
+      "sha256": "79a6e28aa4df7e76e15dc4793dc321d8aa5dda2ec94becc6e67ff5fbc9798bd0"
+    },
+    "boletin_informativo_mensual_202510.zip": {
+      "anio": 2025,
+      "bytes": 507306,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:25:00+00:00",
+      "mes": 10,
+      "sha256": "c28c1d2be3ce9ebfe53be8aa4a968dfe686ed723b2f88310766e825b6273e63b"
+    },
+    "boletin_informativo_mensual_202511.zip": {
+      "anio": 2025,
+      "bytes": 527019,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:19:31+00:00",
+      "mes": 11,
+      "sha256": "28191d5004442bf00aebedae20fde2373281604a088837a128cada02ed53cf04"
+    },
+    "boletin_informativo_mensual_202512.zip": {
+      "anio": 2025,
+      "bytes": 1042787,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:25:05+00:00",
+      "mes": 12,
+      "sha256": "79a6e28aa4df7e76e15dc4793dc321d8aa5dda2ec94becc6e67ff5fbc9798bd0"
+    },
     "boletin_informativo_mensual_202601.zip": {
       "anio": 2026,
       "bytes": 1126958,
       "clave": "boletin_informativo_mensual",
-      "descargado_utc": "2026-10-30T19:42:21+00:00",
+      "descargado_utc": "2026-10-30T21:16:06+00:00",
       "mes": 1,
       "sha256": "6a856dd3e9b19651040390bd72d6734f184f071d2762a7956abe99fb3121565e"
     },
@@ -12,9 +100,73 @@
       "anio": 2026,
       "bytes": 1132251,
       "clave": "boletin_informativo_mensual",
-      "descargado_utc": "2026-10-30T19:42:28+00:00",
+      "descargado_utc": "2026-10-30T21:16:13+00:00",
       "mes": 2,
       "sha256": "86626a4c583db240afd2658e257d80d88f0339ced18cc5edea4fca937f0175ed"
+    },
+    "boletin_informativo_mensual_202603.zip": {
+      "anio": 2026,
+      "bytes": 1131051,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:21:42+00:00",
+      "mes": 3,
+      "sha256": "5517cc09b86b6bd9b7aa81ee80f643cb284d0563c1d14a82c80c4c7f04577782"
+    },
+    "boletin_informativo_mensual_202604.zip": {
+      "anio": 2026,
+      "bytes": 1160682,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:21:48+00:00",
+      "mes": 4,
+      "sha256": "eabe27ee98f5ca1a4c6578f66cbdadf3632db1c032cc4fd5247b11b660eb800d"
+    },
+    "boletin_informativo_mensual_202605.zip": {
+      "anio": 2026,
+      "bytes": 1164458,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:21:55+00:00",
+      "mes": 5,
+      "sha256": "a9118e0f639590a158ef8d3c1726a5da6b1bde265c221bc8de0ace51046e11ab"
+    },
+    "boletin_informativo_mensual_202606.zip": {
+      "anio": 2026,
+      "bytes": 1169280,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:02+00:00",
+      "mes": 6,
+      "sha256": "eea06c8e1fdc78236caf0532424633437e1362fcb4ec6f89e8b5b2642d6cff90"
+    },
+    "boletin_informativo_mensual_202607.zip": {
+      "anio": 2026,
+      "bytes": 507387,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:08+00:00",
+      "mes": 7,
+      "sha256": "fc7e593f3744849735391fc888c3957fb7f8e7e97e7644aaf1137e720da1da23"
+    },
+    "boletin_informativo_mensual_202608.zip": {
+      "anio": 2026,
+      "bytes": 1128349,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:19+00:00",
+      "mes": 8,
+      "sha256": "6d977d311e2a762d8ec251de0178ad1061c1ed72e558b8ff984947980c0c8d6b"
+    },
+    "boletin_informativo_mensual_202609.zip": {
+      "anio": 2026,
+      "bytes": 1042787,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:31+00:00",
+      "mes": 9,
+      "sha256": "79a6e28aa4df7e76e15dc4793dc321d8aa5dda2ec94becc6e67ff5fbc9798bd0"
+    },
+    "boletin_informativo_mensual_202610.zip": {
+      "anio": 2026,
+      "bytes": 507306,
+      "clave": "boletin_informativo_mensual",
+      "descargado_utc": "2026-10-30T21:22:38+00:00",
+      "mes": 10,
+      "sha256": "c28c1d2be3ce9ebfe53be8aa4a968dfe686ed723b2f88310766e825b6273e63b"
     }
   },
   "version": 1

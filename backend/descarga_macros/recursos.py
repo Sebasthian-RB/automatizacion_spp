@@ -51,9 +51,9 @@ RECURSOS_SBS = {
         "extensiones": {".zip"},
         # El zip debe contener el período pedido (p. ej. "Bolweb 03_2025"); si no, se rechaza.
         # Si los años antiguos nombran distinto el Excel interno, ajusta o quita esta línea.
-        "verificar_zip": "{mes:02d}_{anio}",
-        "timeout_total": 90,
-        "timeout_por_periodo": 90,
+        # "verificar_zip": "{mes:02d}_{anio}",,
+        "timeout_total": 70,
+        "timeout_por_periodo": 60,
         "timeout_descarga": 90,
 
         "pasos_inicio": [
