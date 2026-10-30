@@ -1,0 +1,26 @@
+# Integración de descarga_macros
+
+Ubicación: backend/descarga_macros/   (paquete Python, no necesita estar en INSTALLED_APPS)
+
+1. requirements.txt
+   pyautogui
+   pillow
+   opencv-python        # necesario para locateOnScreen(confidence=...)
+
+2. core/settings.py (opcional)
+   SBS_DESCARGAS_DIR = BASE_DIR / "datos_descargados" / "sbs"   # fuera de MEDIA_ROOT / static
+   SBS_COOLDOWN_SEGUNDOS = 30
+   SBS_MAX_BYTES = 50 * 1024 * 1024
+   # SBS_NAVEGADOR_EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+3. core/api/urls.py  (o core/urls.py)
+   from django.urls import include, path
+   urlpatterns += [path("sbs/", include("descarga_macros.urls"))]
+   # Endpoint resultante: POST <prefijo-api>/sbs/descargar/
+
+4. .gitignore
+   datos_descargados/
+
+5. Configurar:
+   - descarga_macros/recursos.py  -> URL real y pasos del cursor
+   - descarga_macros/referencias_ui/ -> capturas PNG de los botones
